@@ -1,0 +1,17 @@
+[package]
+name = "privie"
+version = "0.1.0"
+edition = "2018"
+description = "Small secrets management tool"
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = "^0.8"
+crypto_box = "^0.6"
+structopt = "^0.3"
+anyhow = "^1"
+base64 = "^0.13"
+json = "^0.12"
+
