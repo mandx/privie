@@ -18,13 +18,16 @@ pub trait PathAssign {
         Ok(value.map(Into::into))
     }
 
-    fn path_assign<S, J>(&mut self, path: S, value: Option<J>, force: bool) -> Result<(), Error>
+    fn path_assign<S, J>(
+        &mut self,
+        path: S,
+        value: Option<J>,
+        #[allow(unused_variables)] force: bool,
+    ) -> Result<(), Error>
     where
         S: AsRef<str>,
         J: Into<JsonValue>,
     {
-        drop(force);
-
         fn assign<'is, I>(iter: &'is mut I, location: &mut JsonValue, mut value: JsonValue)
         where
             I: Iterator<Item = &'is str>,

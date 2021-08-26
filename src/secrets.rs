@@ -12,6 +12,7 @@ use crypto_box::{
 use json::{object::Object as JsonObject, JsonValue};
 
 use crate::path_assign::PathAssign;
+use crate::sealed_box;
 
 pub trait HandleDecryptError {
     fn on_decrypt_error<E>(
@@ -26,6 +27,7 @@ pub trait HandleDecryptError {
     }
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub struct EncryptedSecrets<'a> {
     keyring: &'a Keyring,
@@ -33,6 +35,7 @@ pub struct EncryptedSecrets<'a> {
 }
 
 impl<'a> EncryptedSecrets<'a> {
+    #[allow(clippy::unnecessary_wraps)]
     pub fn from_json(keyring: &'a Keyring, json_data: JsonValue) -> Result<Self, Error> {
         Ok(Self {
             keyring,
@@ -59,16 +62,15 @@ impl<'a> EncryptedSecrets<'a> {
     }
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub struct PlainSecrets {
     data: JsonValue,
 }
 
 impl PlainSecrets {
-    pub fn from_json(json_data: JsonValue) -> Result<Self, Error> {
-        Ok(Self {
-            data: json_data.clone(),
-        })
+    pub fn from_json(json_data: JsonValue) -> Self {
+        Self { data: json_data }
     }
 
     pub fn encrypt_with<S>(
@@ -83,7 +85,7 @@ impl PlainSecrets {
     }
 
     pub fn encrypt(self, keyring: &Keyring) -> Result<EncryptedSecrets, Error> {
-        self.encrypt_with(&keyring, None::<&str>)
+        self.encrypt_with(keyring, None::<&str>)
     }
 
     pub fn dump(&self) -> JsonValue {
@@ -103,6 +105,7 @@ impl std::ops::Add for Keyring {
         let mut result = Self::new();
         result.keys.extend(self.keys.into_iter());
         result.keys.extend(rhs.keys.into_iter());
+        result.default_public_key = self.default_public_key;
         result
     }
 }
@@ -110,6 +113,9 @@ impl std::ops::Add for Keyring {
 impl std::ops::AddAssign for Keyring {
     fn add_assign(&mut self, rhs: Self) {
         self.keys.extend(rhs.keys.into_iter());
+        if self.default_public_key.is_none() {
+            self.default_public_key = rhs.default_public_key;
+        }
     }
 }
 
@@ -143,8 +149,9 @@ impl Keyring {
         let mut this = Self::new();
         let secret_key = SecretKey::generate(&mut rand::rngs::OsRng);
         let public_key = secret_key.public_key();
-        this.keys
-            .insert(base64::encode(public_key.as_bytes()), secret_key);
+        let key_id = base64::encode(public_key.as_bytes());
+        this.keys.insert(key_id.clone(), secret_key);
+        this.default_public_key = Some(key_id);
         this
     }
 
@@ -164,7 +171,7 @@ impl Keyring {
 
     fn check_keys(public_key: &str, private_key: &str) -> Result<(PublicKey, SecretKey), Error> {
         let private_key_bytes: [u8; KEY_SIZE] = base64::decode(private_key.as_bytes())
-            .with_context(|| format_err!("Decoding «{}...» as Base64", &private_key[0..5]))?
+            .with_context(|| format_err!("Decoding `{}...` as Base64", &private_key[0..5]))?
             .try_into()
             .map_err(|decoded: Vec<_>| {
                 format_err!(
@@ -175,7 +182,7 @@ impl Keyring {
             })
             .with_context(|| {
                 format!(
-                    "Error decoding {} bytes as a Base64 private key for the «{}» public key ",
+                    "Error decoding {} bytes as a Base64 private key for the `{}` public key ",
                     KEY_SIZE, public_key
                 )
             })?;
@@ -196,16 +203,18 @@ impl Keyring {
         Ok((generated_public_key, decoded_private_key))
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn from_json_obj(json_obj: JsonObject) -> Result<Self, Error> {
         let mut this = Self::new();
         for (key_id, v) in json_obj.iter() {
-            match v {
-                json_string @ (JsonValue::String(_) | JsonValue::Short(_)) => {
-                    let (_, secret_key) = Self::check_keys(key_id, &json_string.as_str().unwrap())
-                        .with_context(|| format!("Error checking public key «{}»", key_id))?;
-                    this.keys.insert(key_id.into(), secret_key);
+            if let json_string @ (JsonValue::String(_) | JsonValue::Short(_)) = v {
+                let (_, secret_key) = Self::check_keys(key_id, json_string.as_str().unwrap())
+                    .with_context(|| format!("Error checking public key `{}`", key_id))?;
+
+                if this.default_public_key.is_none() {
+                    this.default_public_key = Some(key_id.into());
                 }
-                _ => (),
+                this.keys.insert(key_id.into(), secret_key);
             }
         }
         Ok(this)
@@ -227,7 +236,7 @@ impl Keyring {
         let secret_key = self
             .keys
             .get(key_id)
-            .ok_or_else(|| format_err!("Public key «{}» is not in this keyring", key_id))?;
+            .ok_or_else(|| format_err!("Public key `{}` is not in this keyring", key_id))?;
 
         let public_key = secret_key.public_key();
         let nonce = generate_nonce(&mut rand::rngs::OsRng);
@@ -242,7 +251,7 @@ impl Keyring {
                 //     msg: data.as_ref().as_bytes(),
                 // },
             )
-            .with_context(|| format_err!("Error encrypting secret with key «{}»", key_id))?;
+            .with_context(|| format_err!("Error encrypting secret with key `{}`", key_id))?;
 
         Ok(format!(
             "{}{}{}{}{}",
@@ -263,7 +272,7 @@ impl Keyring {
             JsonValue::Object(obj) => {
                 for v in obj
                     .iter_mut()
-                    .filter(|(k, _)| k.chars().nth(0) != Some('_'))
+                    .filter(|(k, _)| !k.starts_with('_'))
                     .map(|(_, v)| v)
                 {
                     self.encrypt_in_place(key_id, v)?;
@@ -312,13 +321,13 @@ impl Keyring {
         let secret_key = self
             .keys
             .get(key_id)
-            .ok_or_else(|| format_err!("Public key «{}» is not in this keyring", key_id))?;
+            .ok_or_else(|| format_err!("Public key `{}` is not in this keyring", key_id))?;
         let public_key = secret_key.public_key();
         let cryptobox = CryptoBox::new(&public_key, secret_key);
         let decrypted = cryptobox
             .decrypt(&nonce, &encrypted[..])
             .context("Decrypting secret")?;
-        Ok(String::from_utf8(decrypted).context("Reading decrypted secret as UTF-8")?)
+        String::from_utf8(decrypted).context("Reading decrypted secret as UTF-8")
     }
 
     pub fn decrypt_in_place<H: HandleDecryptError>(
@@ -328,10 +337,7 @@ impl Keyring {
     ) -> Result<(), Error> {
         match data {
             JsonValue::Object(obj) => {
-                for (_k, v) in obj
-                    .iter_mut()
-                    .filter(|(k, _)| k.chars().nth(0) != Some('_'))
-                {
+                for (_k, v) in obj.iter_mut().filter(|(k, _)| !k.starts_with('_')) {
                     self.decrypt_in_place(v, decrypt_error_handler)?;
                 }
             }
@@ -361,9 +367,7 @@ impl Keyring {
 
     pub fn default_public_key(&self) -> Result<&str, Error> {
         self.default_public_key
-            .as_ref()
-            .map(String::as_str)
-            .or_else(|| self.keys.iter().next().map(|(k, _)| k.as_str()))
+            .as_deref()
             .ok_or_else(|| format_err!("This keyring has no keys yet"))
     }
 
@@ -371,7 +375,7 @@ impl Keyring {
         let public_key = public_key.as_ref();
         if !self.keys.contains_key(public_key) {
             return Err(format_err!(
-                "Public key «{}» is not in this keyring",
+                "Public key `{}` is not in this keyring",
                 public_key
             ));
         }
@@ -391,7 +395,7 @@ impl Keyring {
                 let public_key = public_key.as_ref();
                 if !self.keys.contains_key(public_key) {
                     return Err(format_err!(
-                        "Public key «{}» is not in this keyring",
+                        "Public key `{}` is not in this keyring",
                         public_key
                     ));
                 }
@@ -402,7 +406,7 @@ impl Keyring {
         };
 
         self.encrypt_in_place(&public_key, &mut data)
-            .with_context(|| format_err!("Encrypting secrets with public key «{}»", public_key))?;
+            .with_context(|| format_err!("Encrypting secrets with public key `{}`", public_key))?;
         Ok(EncryptedSecrets {
             keyring: self,
             data,
@@ -438,8 +442,7 @@ impl<'k> PathAssign for EncryptedSecrets<'k> {
         let dunder = path
             .split('.')
             .last()
-            .map(|last| last.chars().nth(0) == Some('_'))
-            .unwrap_or(false);
+            .map_or(false, |last| !last.starts_with('_'));
 
         let value = value.map(Into::into);
         Ok(match (value, dunder) {
@@ -475,8 +478,7 @@ mod assign_tests {
             a: "1",
             b: "2",
             d: "100",
-        })
-        .unwrap();
+        });
 
         assert!(!secrets.data.has_key("c"));
         assert_eq!(secrets.data["d"], JsonValue::from("100"));
@@ -492,6 +494,7 @@ mod assign_tests {
 #[cfg(test)]
 mod tests {
     use json::object;
+    use rand::RngCore;
 
     use super::*;
 
@@ -625,7 +628,7 @@ mod tests {
         assert!(data.is_object());
 
         let keyring = Keyring::generate();
-        let unencrypted_secrets = PlainSecrets::from_json(data.clone()).unwrap();
+        let unencrypted_secrets = PlainSecrets::from_json(data.clone());
         let encrypted_secrets = unencrypted_secrets.encrypt(&keyring).unwrap();
         let encrypted_data = encrypted_secrets.dump();
 
@@ -662,7 +665,7 @@ mod tests {
         assert!(data.is_object());
 
         let keyring = Keyring::generate();
-        let unencrypted_secrets = PlainSecrets::from_json(data.clone()).unwrap();
+        let unencrypted_secrets = PlainSecrets::from_json(data.clone());
         let encrypted_secrets = keyring.encrypt::<&str>(unencrypted_secrets, None).unwrap();
         let encrypted_data = encrypted_secrets.dump();
 
@@ -687,7 +690,7 @@ mod tests {
     fn encrypt_flat_arrays() {
         let data = json::array!["a", "b", "c", "d",];
         let keyring = Keyring::generate();
-        let plain_secrets = PlainSecrets::from_json(data.clone()).unwrap();
+        let plain_secrets = PlainSecrets::from_json(data.clone());
         let encrypted_secrets = plain_secrets.encrypt(&keyring).unwrap();
         let encrypted_data = encrypted_secrets.dump();
 
@@ -706,7 +709,7 @@ mod tests {
     fn encrypt_flat_arrays_nested_data() {
         let data = json::array!["a", {"b": "b1"}, "c", {"_d": "d1"},];
         let keyring = Keyring::generate();
-        let plain_secrets = PlainSecrets::from_json(data.clone()).unwrap();
+        let plain_secrets = PlainSecrets::from_json(data.clone());
         let encrypted_secrets = plain_secrets.encrypt(&keyring).unwrap();
         let encrypted_data = encrypted_secrets.dump();
 
@@ -743,16 +746,65 @@ mod tests {
     fn test_default_public_key() {
         let keyring = Keyring::default();
         assert!(keyring.default_public_key().is_err());
+        assert_eq!(keyring.keys.keys().count(), 0);
+
+        let keyring = Keyring::new();
+        assert!(keyring.default_public_key().is_err());
+        assert_eq!(keyring.keys.keys().count(), 0);
+
         let keyring = Keyring::generate() + Keyring::generate() + Keyring::generate();
-        assert!(keyring.default_public_key.is_none());
+        assert!(keyring.default_public_key.is_some());
+        assert_eq!(keyring.keys.keys().count(), 3);
 
         let pub_key = keyring.default_public_key().unwrap();
         assert!(keyring.keys.contains_key(pub_key));
+    }
 
-        for skip in 1..keyring.keys.len() {
-            let pub_key_2 = keyring.keys.keys().skip(skip).next().unwrap();
-            assert_ne!(pub_key, pub_key_2);
-            assert!(keyring.keys.contains_key(pub_key_2));
-        }
+    #[test]
+    fn default_public_key_is_stable() {
+        let keyring = Keyring::new();
+        assert!(keyring.default_public_key().is_err());
+        assert!(keyring.default_public_key.is_none());
+
+        let mut keyring = Keyring::generate();
+        assert!(keyring.default_public_key().is_ok());
+        assert!(keyring.default_public_key.is_some());
+
+        let key = keyring.default_public_key().unwrap().to_string();
+        keyring += Keyring::generate();
+        assert_eq!(key, keyring.default_public_key().unwrap());
+        keyring += Keyring::generate();
+        assert_eq!(key, keyring.default_public_key().unwrap());
+
+        let keyring2 = keyring + Keyring::generate();
+        assert_eq!(key, keyring2.default_public_key().unwrap());
+    }
+
+    #[test]
+    fn checking_wrong_keys() {
+        let k1 = Keyring::generate();
+        let k2 = Keyring::generate();
+
+        let k1_public = k1.default_public_key().unwrap();
+        let k1_secret = base64::encode(k1.keys.get(k1_public).unwrap().to_bytes());
+
+        let k2_public = k2.default_public_key().unwrap();
+        let k2_secret = base64::encode(k2.keys.get(k2_public).unwrap().to_bytes());
+
+        assert!(Keyring::check_keys(k1_public, &k1_secret).is_ok());
+        assert!(Keyring::check_keys(k2_public, &k2_secret).is_ok());
+
+        assert!(Keyring::check_keys(k1_public, &k2_secret).is_err());
+        assert!(Keyring::check_keys(k2_public, &k1_secret).is_err());
+
+        assert!(Keyring::check_keys(k1_public, &k1_secret[..(k1_secret.len() - 2)]).is_err());
+        assert!(Keyring::check_keys(k2_public, &k2_secret[..(k2_secret.len() - 2)]).is_err());
+        assert!(Keyring::check_keys(&k1_public[..(k1_public.len() - 2)], &k1_secret).is_err());
+        assert!(Keyring::check_keys(&k2_public[..(k2_public.len() - 2)], &k2_secret).is_err());
+
+        let mut rng = rand::rngs::OsRng;
+        let mut buf = Vec::with_capacity(KEY_SIZE * 3);
+        rng.fill_bytes(&mut buf);
+        assert!(Keyring::check_keys(k1_public, &base64::encode(buf)).is_err());
     }
 }

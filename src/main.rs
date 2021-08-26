@@ -5,12 +5,12 @@ use anyhow::Error;
 use json::JsonValue;
 use structopt::StructOpt;
 
-mod crypt;
 mod path_assign;
+mod secrets;
 mod utilities;
 
-use crate::crypt::{EncryptedSecrets, HandleDecryptError, Keyring, PlainSecrets};
 use crate::path_assign::PathAssign;
+use crate::secrets::{EncryptedSecrets, HandleDecryptError, Keyring, PlainSecrets};
 use crate::utilities::{InputFile, OutputFile};
 
 struct DecryptErrorHandler {
@@ -31,7 +31,7 @@ impl HandleDecryptError for DecryptErrorHandler {
             "[Strictness Off] Error decrypting string `{}`: {:?}",
             value, error
         );
-        return Ok(());
+        Ok(())
     }
 }
 

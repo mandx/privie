@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{format_err, Context, Error};
-use json;
 
 #[derive(Debug, Clone)]
 pub struct InputFile {
@@ -62,12 +61,12 @@ impl InputFile {
     pub fn read(&self) -> Result<String, Error> {
         let mut reader = self
             .open()
-            .with_context(|| format_err!("Opening «{}» for reading", self))?;
+            .with_context(|| format_err!("Opening `{}` for reading", self))?;
 
         let mut buf = String::new();
         reader
             .read_to_string(&mut buf)
-            .with_context(|| format_err!("Reading from «{}»", self))?;
+            .with_context(|| format_err!("Reading from `{}`", self))?;
         Ok(buf)
     }
 
@@ -135,14 +134,14 @@ impl OutputFile {
 
     pub fn write<S: AsRef<[u8]>>(&self, content: S) -> Result<(), Error> {
         self.open()
-            .with_context(|| format_err!("Opening «{}» for writing", self))?
+            .with_context(|| format_err!("Opening `{}` for writing", self))?
             .write_all(content.as_ref())
-            .with_context(|| format_err!("Writing to «{}»"))
+            .with_context(|| format_err!("Writing to `{}`"))
     }
 
     pub fn write_json<J: Into<json::JsonValue>>(&self, data: J) -> Result<(), Error> {
         self.write(&json::stringify(data.into()))
-            .with_context(|| format_err!("Writing JSON to «{}»...",))
+            .with_context(|| format_err!("Writing JSON to `{}`...",))
     }
 }
 
