@@ -5,7 +5,34 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{format_err, Context, Error};
+use thiserror::Error as ThisError;
+
+#[derive(Debug, ThisError)]
+pub enum IoUtilsError<P: std::fmt::Debug + Display> {
+    #[error("Could not open `{path}`")]
+    Open {
+        #[source]
+        source: io::Error,
+        path: P,
+    },
+
+    #[error("Could not read from `{path}`")]
+    Read {
+        #[source]
+        source: io::Error,
+        path: P,
+    },
+
+    #[error("Could not write to `{path}`")]
+    Write {
+        #[source]
+        source: io::Error,
+        path: P,
+    },
+
+    #[error("Could not parse `{path}` as JSON")]
+    JsonParse { source: json::Error, path: P },
+}
 
 #[derive(Debug, Clone)]
 pub struct InputFile {
@@ -51,27 +78,36 @@ impl InputFile {
         }
     }
 
-    pub fn open(&self) -> Result<impl Read, io::Error> {
+    pub fn open(&self) -> Result<impl Read, IoUtilsError<Self>> {
         match &self.filename {
-            Some(path) => Ok(Box::new(BufReader::new(File::open(path)?)) as Box<dyn Read>),
+            Some(path) => Ok(Box::new(BufReader::new(File::open(path).map_err(|error| {
+                IoUtilsError::Open {
+                    source: error,
+                    path: self.clone(),
+                }
+            })?)) as Box<dyn Read>),
             None => Ok(Box::new(BufReader::new(stdin())) as Box<dyn Read>),
         }
     }
 
-    pub fn read(&self) -> Result<String, Error> {
-        let mut reader = self
-            .open()
-            .with_context(|| format_err!("Opening `{}` for reading", self))?;
+    pub fn read(&self) -> Result<String, IoUtilsError<Self>> {
+        let mut reader = self.open()?;
 
         let mut buf = String::new();
         reader
             .read_to_string(&mut buf)
-            .with_context(|| format_err!("Reading from `{}`", self))?;
+            .map_err(|error| IoUtilsError::Read {
+                source: error,
+                path: self.clone(),
+            })?;
         Ok(buf)
     }
 
-    pub fn read_json(&self) -> Result<json::JsonValue, Error> {
-        Ok(json::parse(&self.read()?)?)
+    pub fn read_json(&self) -> Result<json::JsonValue, IoUtilsError<Self>> {
+        json::parse(&self.read()?).map_err(|error| IoUtilsError::JsonParse {
+            source: error,
+            path: self.clone(),
+        })
     }
 }
 
@@ -119,29 +155,34 @@ impl OutputFile {
         }
     }
 
-    pub fn open(&self) -> Result<impl Write, io::Error> {
+    pub fn open(&self) -> Result<impl Write, IoUtilsError<Self>> {
         match &self.filename {
             Some(path) => Ok(Box::new(BufWriter::new(
                 OpenOptions::new()
                     .write(true)
                     .truncate(true)
                     .create(true)
-                    .open(path)?,
+                    .open(path)
+                    .map_err(|error| IoUtilsError::Open {
+                        source: error,
+                        path: self.clone(),
+                    })?,
             )) as Box<dyn Write>),
             None => Ok(Box::new(BufWriter::new(stdout())) as Box<dyn Write>),
         }
     }
 
-    pub fn write<S: AsRef<[u8]>>(&self, content: S) -> Result<(), Error> {
-        self.open()
-            .with_context(|| format_err!("Opening `{}` for writing", self))?
+    pub fn write<S: AsRef<[u8]>>(&self, content: S) -> Result<(), IoUtilsError<Self>> {
+        self.open()?
             .write_all(content.as_ref())
-            .with_context(|| format_err!("Writing to `{}`"))
+            .map_err(|error| IoUtilsError::Write {
+                source: error,
+                path: self.clone(),
+            })
     }
 
-    pub fn write_json<J: Into<json::JsonValue>>(&self, data: J) -> Result<(), Error> {
+    pub fn write_json<J: Into<json::JsonValue>>(&self, data: J) -> Result<(), IoUtilsError<Self>> {
         self.write(&json::stringify(data.into()))
-            .with_context(|| format_err!("Writing JSON to `{}`...",))
     }
 }
 

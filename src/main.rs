@@ -6,23 +6,26 @@ use json::JsonValue;
 use structopt::StructOpt;
 
 mod path_assign;
+mod sealed_box;
 mod secrets;
 mod utilities;
 
 use crate::path_assign::PathAssign;
-use crate::secrets::{EncryptedSecrets, HandleDecryptError, Keyring, PlainSecrets};
-use crate::utilities::{InputFile, OutputFile};
+use crate::secrets::{EncryptedSecrets, HandleError, Keyring, PlainSecrets};
+use crate::utilities::{InputFile, IoUtilsError, OutputFile};
 
-struct DecryptErrorHandler {
-    strict: bool,
+#[derive(Debug)]
+struct CliErrorHandler {
+    strict_key_loading: bool,
+    strict_decryption: bool,
 }
 
-impl HandleDecryptError for DecryptErrorHandler {
-    fn on_decrypt_error<E>(&self, value: &mut json::JsonValue, error: E) -> Result<(), E>
+impl HandleError for CliErrorHandler {
+    fn decrypt_error<E>(&self, value: &mut json::JsonValue, error: E) -> Result<(), E>
     where
         E: Debug,
     {
-        if self.strict {
+        if self.strict_decryption {
             return Err(error);
         }
 
@@ -33,11 +36,34 @@ impl HandleDecryptError for DecryptErrorHandler {
         );
         Ok(())
     }
+
+    fn key_load_error<E>(
+        &self,
+        #[allow(unused_variables)] public_key: &str,
+        #[allow(unused_variables)] private_key: &str,
+        error: E,
+    ) -> Result<(), E>
+    where
+        E: Debug,
+    {
+        if self.strict_key_loading {
+            return Err(error);
+        }
+        // TODO: Colors!
+        eprintln!(
+            "[Strictness Off] Error loading keys `{}`: {:?}",
+            public_key, error
+        );
+        Ok(())
+    }
 }
 
-impl DecryptErrorHandler {
-    fn new(strict: bool) -> Self {
-        Self { strict }
+impl CliErrorHandler {
+    fn new(strict_key_loading: bool, strict_decryption: bool) -> Self {
+        Self {
+            strict_key_loading,
+            strict_decryption,
+        }
     }
 }
 
@@ -52,6 +78,11 @@ enum CliCommands {
     VerifyKeyring {
         #[structopt(short, long, default_value)]
         input: InputFile,
+        #[structopt(
+            long,
+            help = "Verify keyring's keys, like their size and that public/secret pair do match."
+        )]
+        strict_keyring: bool,
     },
 
     Encrypt {
@@ -63,6 +94,11 @@ enum CliCommands {
         output: OutputFile,
         #[structopt(long)]
         key_id: Option<String>,
+        #[structopt(
+            long,
+            help = "Verify keyring's keys, like their size and that public/secret pair do match."
+        )]
+        strict_keyring: bool,
     },
 
     Decrypt {
@@ -72,8 +108,16 @@ enum CliCommands {
         input: InputFile,
         #[structopt(short, long, default_value)]
         output: OutputFile,
-        #[structopt(short, long)]
-        strict: bool,
+        #[structopt(
+            long,
+            help = "Verify keyring's keys, like their size and that public/secret pair do match."
+        )]
+        strict_keyring: bool,
+        #[structopt(
+            long,
+            help = "Abort the operation if at least one secret fails to be decrypted"
+        )]
+        strict_decryption: bool,
     },
 
     AddSecret {
@@ -87,13 +131,17 @@ enum CliCommands {
         force: bool,
         #[structopt(long)]
         key_id: Option<String>,
+        #[structopt(
+            long,
+            help = "Verify keyring's keys, like their size and that public/secret pair do match."
+        )]
+        strict_keyring: bool,
         #[structopt(long)]
         create: bool,
 
         path: String,
         value: Option<String>,
     },
-    // ScratchPad,
 }
 
 fn main() -> Result<(), Error> {
@@ -102,10 +150,18 @@ fn main() -> Result<(), Error> {
     match cli_args {
         CliCommands::VerifyKeyring { input } => {
             Keyring::from_json(input.read_json()?)?;
+        CliCommands::VerifyKeyring {
+            input,
+            strict_keyring,
+        } => {
+            Keyring::from_json(
+                input.read_json()?,
+                CliErrorHandler::new(strict_keyring, true),
+            )?;
         }
 
         CliCommands::GenerateKeyring { output } => {
-            output.write_json(Keyring::generate().to_json())?;
+            output.write_json(Keyring::generate(CliErrorHandler::new(true, true)).to_json())?;
         }
 
         CliCommands::Encrypt {
@@ -113,9 +169,13 @@ fn main() -> Result<(), Error> {
             input,
             output,
             key_id,
+            strict_keyring,
         } => {
-            let keyring = Keyring::from_json(keyring_file.read_json()?)?;
-            let unencrypted_secrets = PlainSecrets::from_json(input.read_json()?)?;
+            let keyring = Keyring::from_json(
+                keyring_file.read_json()?,
+                CliErrorHandler::new(strict_keyring, true),
+            )?;
+            let unencrypted_secrets = PlainSecrets::from_json(input.read_json()?);
             output.write_json(unencrypted_secrets.encrypt_with(&keyring, key_id)?.dump())?;
         }
 
@@ -123,16 +183,15 @@ fn main() -> Result<(), Error> {
             keyring: keyring_file,
             input,
             output,
-            strict,
+            strict_keyring,
+            strict_decryption,
         } => {
-            let decrypt_error_handler = DecryptErrorHandler::new(strict);
-            let keyring = Keyring::from_json(keyring_file.read_json()?)?;
-            let encrypted_secrets = EncryptedSecrets::from_json(&keyring, input.read_json()?)?;
-            output.write_json(
-                encrypted_secrets
-                    .decrypt(Some(&decrypt_error_handler))?
-                    .dump(),
+            let keyring = Keyring::from_json(
+                keyring_file.read_json()?,
+                CliErrorHandler::new(strict_keyring, strict_decryption),
             )?;
+            let encrypted_secrets = EncryptedSecrets::from_json(&keyring, input.read_json()?);
+            output.write_json(encrypted_secrets.decrypt()?.dump())?;
         }
 
         CliCommands::AddSecret {
@@ -144,23 +203,29 @@ fn main() -> Result<(), Error> {
             force,
             key_id,
             create,
+            strict_keyring,
         } => {
-            let mut keyring = Keyring::from_json(keyring_file.read_json()?)?;
+            let mut keyring = Keyring::from_json(
+                keyring_file.read_json()?,
+                CliErrorHandler::new(strict_keyring, true),
+            )?;
             if let Some(key_id) = key_id {
                 keyring.set_default_public_key(key_id)?;
             }
             let mut encrypted_secrets = EncryptedSecrets::from_json(
                 &keyring,
                 input.read_json().or_else(|error| {
-                    // TODO: Inspect `error` and only act on `create` if
-                    // it's a "not found"/"does not exist" type of error
+                    // TODO: Is there a way to do this this better than with three nested `if`s
                     if create {
-                        Ok(JsonValue::new_object())
-                    } else {
-                        Err(error)
+                        if let IoUtilsError::Open { ref source, .. } = error {
+                            if let std::io::ErrorKind::NotFound = source.kind() {
+                                return Ok(JsonValue::new_object());
+                            }
+                        }
                     }
+                    Err(error)
                 })?,
-            )?;
+            );
 
             encrypted_secrets.path_assign(
                 json_path,

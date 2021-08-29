@@ -1,16 +1,15 @@
 use std::{mem, ops::IndexMut};
 
-use anyhow::Error;
 use json::JsonValue;
 
-pub trait PathAssign {
+pub trait PathAssign<E> {
     fn get_assign_target(&mut self) -> &mut JsonValue;
 
     fn preprocess_value<K, J>(
         &self,
         #[allow(unused_variables)] path: K,
         value: Option<J>,
-    ) -> Result<Option<JsonValue>, Error>
+    ) -> Result<Option<JsonValue>, E>
     where
         K: AsRef<str>,
         J: Into<JsonValue>,
@@ -23,7 +22,7 @@ pub trait PathAssign {
         path: S,
         value: Option<J>,
         #[allow(unused_variables)] force: bool,
-    ) -> Result<(), Error>
+    ) -> Result<(), E>
     where
         S: AsRef<str>,
         J: Into<JsonValue>,
@@ -34,7 +33,6 @@ pub trait PathAssign {
         {
             match iter.next() {
                 Some(position) => {
-                    dbg!(&position);
                     assign(iter, location.index_mut(position), value);
                 }
                 None => {

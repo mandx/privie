@@ -1,3 +1,5 @@
 /target
 src/_main.rs
 *.sublime-*
+cobertura.xml
+coverage.html
