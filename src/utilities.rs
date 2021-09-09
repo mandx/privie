@@ -182,7 +182,7 @@ impl OutputFile {
     }
 
     pub fn write_json<J: Into<json::JsonValue>>(&self, data: J) -> Result<(), IoUtilsError<Self>> {
-        self.write(&json::stringify(data.into()))
+        self.write(&json::stringify_pretty(data.into(), 2))
     }
 }
 
