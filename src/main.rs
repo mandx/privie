@@ -14,7 +14,7 @@ use crate::path_assign::PathAssign;
 use crate::secrets::{EncryptedSecrets, HandleError, Keyring, PlainSecrets};
 use crate::utilities::{InputFile, IoUtilsError, OutputFile};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CliErrorHandler {
     strict_key_loading: bool,
     strict_decryption: bool,
@@ -88,6 +88,8 @@ enum CliCommands {
     Encrypt {
         #[structopt(short, long, env = "PRIVIE_KEYRING")]
         keyring: InputFile,
+        #[structopt(long)]
+        extra_keyrings: Vec<InputFile>,
         #[structopt(short, long, default_value)]
         input: InputFile,
         #[structopt(short, long, default_value)]
@@ -104,6 +106,8 @@ enum CliCommands {
     Decrypt {
         #[structopt(short, long, env = "PRIVIE_KEYRING")]
         keyring: InputFile,
+        #[structopt(long)]
+        extra_keyrings: Vec<InputFile>,
         #[structopt(short, long, default_value)]
         input: InputFile,
         #[structopt(short, long, default_value)]
@@ -123,6 +127,8 @@ enum CliCommands {
     AddSecret {
         #[structopt(short, long, env = "PRIVIE_KEYRING")]
         keyring: InputFile,
+        #[structopt(long)]
+        extra_keyrings: Vec<InputFile>,
         #[structopt(short, long, default_value)]
         input: InputFile,
         #[structopt(short, long, default_value)]
@@ -148,8 +154,6 @@ fn main() -> Result<(), Error> {
     let cli_args = CliCommands::from_args();
 
     match cli_args {
-        CliCommands::VerifyKeyring { input } => {
-            Keyring::from_json(input.read_json()?)?;
         CliCommands::VerifyKeyring {
             input,
             strict_keyring,
@@ -166,36 +170,44 @@ fn main() -> Result<(), Error> {
 
         CliCommands::Encrypt {
             keyring: keyring_file,
+            extra_keyrings: extra_keyring_files,
             input,
             output,
             key_id,
             strict_keyring,
         } => {
-            let keyring = Keyring::from_json(
-                keyring_file.read_json()?,
-                CliErrorHandler::new(strict_keyring, true),
-            )?;
+            let error_handler = CliErrorHandler::new(strict_keyring, true);
+            let mut keyring = Keyring::from_json(keyring_file.read_json()?, error_handler.clone())?;
+            for extra_keyring_file in extra_keyring_files {
+                keyring +=
+                    Keyring::from_json(extra_keyring_file.read_json()?, error_handler.clone())?;
+            }
             let unencrypted_secrets = PlainSecrets::from_json(input.read_json()?);
             output.write_json(unencrypted_secrets.encrypt_with(&keyring, key_id)?.dump())?;
         }
 
         CliCommands::Decrypt {
             keyring: keyring_file,
+            extra_keyrings: extra_keyring_files,
             input,
             output,
             strict_keyring,
             strict_decryption,
         } => {
-            let keyring = Keyring::from_json(
-                keyring_file.read_json()?,
-                CliErrorHandler::new(strict_keyring, strict_decryption),
-            )?;
+            let error_handler = CliErrorHandler::new(strict_keyring, strict_decryption);
+            let mut keyring = Keyring::from_json(keyring_file.read_json()?, error_handler.clone())?;
+            for extra_keyring_file in extra_keyring_files {
+                keyring +=
+                    Keyring::from_json(extra_keyring_file.read_json()?, error_handler.clone())?;
+            }
             let encrypted_secrets = EncryptedSecrets::from_json(&keyring, input.read_json()?);
             output.write_json(encrypted_secrets.decrypt()?.dump())?;
         }
 
         CliCommands::AddSecret {
             keyring: keyring_file,
+            extra_keyrings: extra_keyring_files,
+
             input,
             output,
             path: json_path,
@@ -205,13 +217,16 @@ fn main() -> Result<(), Error> {
             create,
             strict_keyring,
         } => {
-            let mut keyring = Keyring::from_json(
-                keyring_file.read_json()?,
-                CliErrorHandler::new(strict_keyring, true),
-            )?;
+            let error_handler = CliErrorHandler::new(strict_keyring, true);
+            let mut keyring = Keyring::from_json(keyring_file.read_json()?, error_handler.clone())?;
+            for extra_keyring_file in extra_keyring_files {
+                keyring +=
+                    Keyring::from_json(extra_keyring_file.read_json()?, error_handler.clone())?;
+            }
             if let Some(key_id) = key_id {
                 keyring.set_default_public_key(key_id)?;
             }
+
             let mut encrypted_secrets = EncryptedSecrets::from_json(
                 &keyring,
                 input.read_json().or_else(|error| {

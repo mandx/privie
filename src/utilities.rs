@@ -221,7 +221,7 @@ pub fn write_output<P: AsRef<Path>, S: AsRef<str>>(
     writer.write_all(content.as_ref().as_bytes())
 }
 
-pub fn load_json<P: AsRef<Path>>(filename: Option<P>) -> Result<json::JsonValue, Error> {
+pub fn load_json<P: AsRef<Path>>(filename: Option<P>) -> Result<json::JsonValue, anyhow::Error> {
     Ok(json::parse(&read_input(filename)?)?)
 }
 

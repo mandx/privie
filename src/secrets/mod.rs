@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     convert::TryFrom,
     fmt::{Debug, Display, Formatter},
+    iter::FromIterator,
     string::FromUtf8Error,
 };
 
@@ -215,6 +216,20 @@ impl<H: HandleError + Debug> std::fmt::Debug for Keyring<H> {
 impl Default for Keyring<DefaultErrorHandler> {
     fn default() -> Self {
         Keyring::new(DefaultErrorHandler)
+    }
+}
+
+impl<H: HandleError + Debug + Default> FromIterator<Keyring<H>> for Keyring<H> {
+    fn from_iter<I>(iterable: I) -> Self
+    where
+        I: IntoIterator<Item = Self>,
+    {
+        let mut iterator = iterable.into_iter();
+        let mut result = Keyring::new(H::default());
+        while let Some(keyring) = iterator.next() {
+            result += keyring;
+        }
+        result
     }
 }
 
