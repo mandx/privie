@@ -1,6 +1,6 @@
 # 🔐 Privie 🔐
 
-An experimental (and opinionated) CLI utility to manage secrets as part of code, managed with your source control system. This utility is heavily inspired by [`ejson`](https://github.com/Shopify/ejson), and so, it strives to keep all of its benefits, which are:
+An experimental (and opinionated, and probably over-engineered) CLI utility to manage secrets as part of code, managed with your source control system. This utility is heavily inspired by [`ejson`](https://github.com/Shopify/ejson), and so, it strives to keep all of its benefits, which are:
 
 > * Secrets can be safely stored in a git repo.
 > * Changes to secrets are auditable on a line-by-line basis with git blame.
@@ -11,6 +11,7 @@ An experimental (and opinionated) CLI utility to manage secrets as part of code,
 There are also a couple more (opinionated) improvements:
 
 * Keyrings are a single JSON file, instead of files named with random hashes. Now there's a single file with an explicit name to be added to `.gitignore`.
+* By default keyrings are looked up in the current directory, so no need to modify your own system using `sudo` on  `/opt/` or whatever.
 * Full support for `stdin`/`stdout`, plus explicit CLI flags to specify the input and output files.
 * Handy subcommand to add and encrypt secrets to an existing secrets file; less hand editing files.
 * Public keys are embedded in the encrypted secrets themselves, instead of a single public key shared for all the secrets in the document. This allows for two things:
@@ -109,4 +110,8 @@ This is where is up to the team to decide where to keep this file, and also, how
         run: |
           echo $KEYRING_CONTENTS > my-keyring.json
           privie decrypt --keyring=my-keyring.json --input=my-encrypted-secrets.json --output=my-decrypted-secrets.json
+```
+
+```
+// TODO: Add more examples
 ```

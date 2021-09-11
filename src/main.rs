@@ -68,49 +68,89 @@ impl CliErrorHandler {
 }
 
 #[derive(Debug, StructOpt)]
-#[structopt(about = "Privie")]
+#[structopt(name = "Privie", about = "Code secrets management tool")]
 enum CliCommands {
+    #[structopt(help = "Generate a new keyring file with a single key pair")]
     GenerateKeyring {
-        #[structopt(short, long, default_value)]
+        #[structopt(
+            short,
+            long,
+            default_value,
+            help = "Where to write the JSON keyring data."
+        )]
         output: OutputFile,
     },
 
+    #[structopt(
+        help = "Verify a keyring file, like its keys size and that public/secret pair do match."
+    )]
     VerifyKeyring {
-        #[structopt(short, long, default_value)]
+        #[structopt(short, long, default_value, help = "JSON keyring to verify.")]
         input: InputFile,
-        #[structopt(
-            long,
-            help = "Verify keyring's keys, like their size and that public/secret pair do match."
-        )]
-        strict_keyring: bool,
     },
 
     Encrypt {
-        #[structopt(short, long, env = "PRIVIE_KEYRING")]
+        #[structopt(
+            short,
+            long,
+            env = "PRIVIE_KEYRING",
+            default_value = "./.privie-keyring.json",
+            help = "Keyring used for encryption."
+        )]
         keyring: InputFile,
-        #[structopt(long)]
+        #[structopt(
+            long,
+            help = "Extra keyrings to use. These will all get merged with the primary one and used as one."
+        )]
         extra_keyrings: Vec<InputFile>,
-        #[structopt(short, long, default_value)]
+        #[structopt(short, long, default_value, help = "The JSON data to encrypt.")]
         input: InputFile,
-        #[structopt(short, long, default_value)]
+        #[structopt(
+            short,
+            long,
+            default_value,
+            help = "Where to write the encrypted JSON data."
+        )]
         output: OutputFile,
-        #[structopt(long)]
+        #[structopt(
+            long,
+            help = "Use this key to encrypt secrets, instead of the one being picked at random. This key doesn't have to be present in the keyring, though it would have to be present in the keyring (and with its corresponding secret key) when decrypting."
+        )]
         key_id: Option<String>,
         #[structopt(
             long,
-            help = "Verify keyring's keys, like their size and that public/secret pair do match."
+            help = "Verify the keyring's keys, like their size and that public/secret pair do match."
         )]
         strict_keyring: bool,
     },
 
     Decrypt {
-        #[structopt(short, long, env = "PRIVIE_KEYRING")]
+        #[structopt(
+            short,
+            long,
+            env = "PRIVIE_KEYRING",
+            default_value = "./.privie-keyring.json",
+            help = "Keyring used for encryption. You will need to make sure all the referenced public keys have their corresponding secret keys to be able to decrypt with them."
+        )]
         keyring: InputFile,
-        #[structopt(long)]
+        #[structopt(
+            long,
+            help = "Extra keyrings to use. These will all get merged with the primary one and used as one."
+        )]
         extra_keyrings: Vec<InputFile>,
-        #[structopt(short, long, default_value)]
+        #[structopt(
+            short,
+            long,
+            default_value,
+            help = "The encrypted JSON data to decrypt"
+        )]
         input: InputFile,
-        #[structopt(short, long, default_value)]
+        #[structopt(
+            short,
+            long,
+            default_value,
+            help = "Where to write the decrypted JSON data"
+        )]
         output: OutputFile,
         #[structopt(
             long,
@@ -125,27 +165,58 @@ enum CliCommands {
     },
 
     AddSecret {
-        #[structopt(short, long, env = "PRIVIE_KEYRING")]
+        #[structopt(
+            short,
+            long,
+            env = "PRIVIE_KEYRING",
+            default_value = "./.privie-keyring.json",
+            help = "Keyring used for encryption."
+        )]
         keyring: InputFile,
-        #[structopt(long)]
+        #[structopt(
+            long,
+            help = "Extra keyrings to use. These will all get merged with the primary one and used as one."
+        )]
         extra_keyrings: Vec<InputFile>,
-        #[structopt(short, long, default_value)]
+        #[structopt(
+            short,
+            long,
+            default_value,
+            help = "The encrypted JSON data to add secrets to."
+        )]
         input: InputFile,
-        #[structopt(short, long, default_value)]
+        #[structopt(
+            short,
+            long,
+            default_value,
+            help = "Where to write the decrypted JSON data."
+        )]
         output: OutputFile,
-        #[structopt(short, long)]
+        #[structopt(short, long, help = "Force overwriting existing values.")]
         force: bool,
-        #[structopt(long)]
+        #[structopt(
+            long,
+            help = "Use this key to encrypt secrets, instead of the one being picked at random. This key doesn't have to be present in the keyring, though it would have to be present in the keyring (and with its corresponding secret key) when decrypting."
+        )]
         key_id: Option<String>,
         #[structopt(
             long,
             help = "Verify keyring's keys, like their size and that public/secret pair do match."
         )]
         strict_keyring: bool,
-        #[structopt(long)]
+        #[structopt(
+            long,
+            help = "Don't abort if there is no input file, create an empty JSON document and add new secrets to it."
+        )]
         create: bool,
 
+        #[structopt(
+            help = "JSON path where to set the new value. Currently only simple `object.field.subField` paths are supported."
+        )]
         path: String,
+        #[structopt(
+            help = "The JSON value to set. This will be parsed as a JSON string, and if the parsed valie is a string, it will be encrypted before written to the output. If parsing fails, the entire argument is used as a string and encryptted. If this argument is missing, then the value at this path is removed."
+        )]
         value: Option<String>,
     },
 }
@@ -154,14 +225,8 @@ fn main() -> Result<(), Error> {
     let cli_args = CliCommands::from_args();
 
     match cli_args {
-        CliCommands::VerifyKeyring {
-            input,
-            strict_keyring,
-        } => {
-            Keyring::from_json(
-                input.read_json()?,
-                CliErrorHandler::new(strict_keyring, true),
-            )?;
+        CliCommands::VerifyKeyring { input } => {
+            Keyring::from_json(input.read_json()?, CliErrorHandler::new(true, true))?;
         }
 
         CliCommands::GenerateKeyring { output } => {
