@@ -241,6 +241,7 @@ fn main() -> Result<(), Error> {
             key_id,
             strict_keyring,
         } => {
+            InputFile::check_stdin_once([&input, &keyring_file])?;
             let error_handler = CliErrorHandler::new(strict_keyring, true);
             let mut keyring = Keyring::from_json(keyring_file.read_json()?, error_handler.clone())?;
             for extra_keyring_file in extra_keyring_files {
@@ -259,6 +260,7 @@ fn main() -> Result<(), Error> {
             strict_keyring,
             strict_decryption,
         } => {
+            InputFile::check_stdin_once([&input, &keyring_file])?;
             let error_handler = CliErrorHandler::new(strict_keyring, strict_decryption);
             let mut keyring = Keyring::from_json(keyring_file.read_json()?, error_handler.clone())?;
             for extra_keyring_file in extra_keyring_files {
@@ -282,6 +284,7 @@ fn main() -> Result<(), Error> {
             create,
             strict_keyring,
         } => {
+            InputFile::check_stdin_once([&input, &keyring_file])?;
             let error_handler = CliErrorHandler::new(strict_keyring, true);
             let mut keyring = Keyring::from_json(keyring_file.read_json()?, error_handler.clone())?;
             for extra_keyring_file in extra_keyring_files {

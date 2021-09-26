@@ -18,8 +18,8 @@ There are also a couple more (opinionated) improvements:
  * JSON documents can now have an arbitrary structure, now there's no requirement for them to be an object. We could have a JSON document containing an array of strings, the individual strings inside the array can be encrypted too.
  * We can construct an encrypted secrets file in which each secret can have independent public keys, so, when decoding, only the keys in the keyring with a corresponding secret key will be decrypted; the rest of the secrets (those that couldn't be decrypted) will be left as-is in the output.
 
-## Caveats
-Unfortunately Privie can not (yet) be recommended for production environments, mainly because:
+## Caveats (or, why you shouldn't use this)
+Unfortunately, at this moment, Privie can not be recommended for production environments, mainly because:
 * I'm not cryptography expert! (Help is welcomed)
 * The [cryptographic libraries used](https://github.com/RustCrypto) provide a good API, however they haven't been (yet) properly audited.
 
@@ -106,12 +106,17 @@ This is where is up to the team to decide where to keep this file, and also, how
       - name: Decrypt the secrets file
         env:
           KEYRING_CONTENTS: ${{ secrets.KEYRING_CONTENTS }}
-          EJSON_PRIVATE_KEY: ${{ secrets.EJSON_PRIVATE_KEY }}
         run: |
           echo $KEYRING_CONTENTS > my-keyring.json
           privie decrypt --keyring=my-keyring.json --input=my-encrypted-secrets.json --output=my-decrypted-secrets.json
 ```
 
+You can also have the keyring's content piped in via `stdin`, like so:
+
 ```
+$ echo $KEYRING_CONTENTS | privie decrypt --keyring=- --input=my-encrypted-secrets.json --output=my-decrypted-secrets.json
+```
+Most commands with a `--keyring` argument will allow using `-` to denote to read from `stdin`, the limitation being that it won't be possible then to use `stdin` for the `--input` argument.
+
 // TODO: Add more examples
 ```

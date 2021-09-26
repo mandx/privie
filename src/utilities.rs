@@ -32,6 +32,9 @@ pub enum IoUtilsError<P: std::fmt::Debug + Display> {
 
     #[error("Could not parse `{path}` as JSON")]
     JsonParse { source: json::Error, path: P },
+
+    #[error("STDIN can be used only once")]
+    MultipleStdInRefs,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +111,21 @@ impl InputFile {
             source: error,
             path: self.clone(),
         })
+    }
+
+    pub fn check_stdin_once<'a, I: IntoIterator<Item = &'a Self>>(
+        inputs: I,
+    ) -> Result<(), IoUtilsError<Self>> {
+        let mut found = false;
+        for input in inputs.into_iter() {
+            if input.filename.is_none() {
+                if found {
+                    return Err(IoUtilsError::MultipleStdInRefs);
+                }
+                found = true;
+            }
+        }
+        Ok(())
     }
 }
 
