@@ -13,7 +13,7 @@ use crypto_box::{
 pub use crypto_box::{PublicKey, SecretKey, KEY_SIZE};
 
 #[derive(Debug, BaseError)]
-pub enum SealedBoxError {
+pub enum Error {
     #[error("Encrypt/Decrypt error ({0})")]
     CryptError(#[from] AeadError),
     #[error(
@@ -31,7 +31,7 @@ const SEALEDBOX_OVERHEAD: usize = KEY_SIZE + BOX_OVERHEAD;
 
 /// Generate the nonce for the given public keys
 ///
-/// nonce = Blake2b(ephemeral_pk + target_pk)
+/// nonce = `Blake2b(ephemeral_pk + target_pk)`
 /// length = 24
 fn get_nonce(
     ephemeral_public_key: &PublicKey,
@@ -49,8 +49,8 @@ fn get_nonce(
 
 /// Encrypt the given buffer for the given public key
 ///
-/// overhead: 48 bytes = KEY_SIZE (32, ephemeral pk) + 16 (box overhead)
-pub fn seal(data: &[u8], public_key: &PublicKey) -> Result<Vec<u8>, SealedBoxError> {
+/// overhead: 48 bytes = `KEY_SIZE` (32, ephemeral pk) + 16 (box overhead)
+pub fn seal(data: &[u8], public_key: &PublicKey) -> Result<Vec<u8>, Error> {
     let mut result = Vec::with_capacity(SEALEDBOX_OVERHEAD + data.len());
 
     let ephemeral_secret_key = SecretKey::generate(&mut rand::rngs::OsRng);
@@ -62,21 +62,17 @@ pub fn seal(data: &[u8], public_key: &PublicKey) -> Result<Vec<u8>, SealedBoxErr
 
     let crypto_box = CryptoBox::new(public_key, &ephemeral_secret_key);
 
-    result.extend_from_slice(
-        &crypto_box
-            .encrypt(nonce, data)
-            .map_err(SealedBoxError::from)?,
-    );
+    result.extend_from_slice(&crypto_box.encrypt(nonce, data).map_err(Error::from)?);
     Ok(result)
 }
 
 /// Attempt to decrypt the given ciphertext with the given secret key.
 /// Will fail if the secret key doesn't match the public key used to
 /// encrypt the payload, or if the ciphertext is not long enough.
-pub fn open(ciphertext: &[u8], secret_key: &SecretKey) -> Result<Vec<u8>, SealedBoxError> {
+pub fn open(ciphertext: &[u8], secret_key: &SecretKey) -> Result<Vec<u8>, Error> {
     if ciphertext.len() <= KEY_SIZE {
         // Not long enough
-        return Err(SealedBoxError::MalformedData(ciphertext.len()));
+        return Err(Error::MalformedData(ciphertext.len()));
     }
 
     let ephemeral_pk = {
@@ -90,9 +86,7 @@ pub fn open(ciphertext: &[u8], secret_key: &SecretKey) -> Result<Vec<u8>, Sealed
 
     let encrypted = &ciphertext[KEY_SIZE..];
     let crypto_box = CryptoBox::new(&ephemeral_pk, secret_key);
-    crypto_box
-        .decrypt(nonce, encrypted)
-        .map_err(SealedBoxError::from)
+    crypto_box.decrypt(nonce, encrypted).map_err(Error::from)
 }
 
 #[cfg(test)]

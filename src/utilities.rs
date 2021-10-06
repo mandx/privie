@@ -117,7 +117,7 @@ impl InputFile {
         inputs: I,
     ) -> Result<(), IoUtilsError<Self>> {
         let mut found = false;
-        for input in inputs.into_iter() {
+        for input in inputs {
             if input.filename.is_none() {
                 if found {
                     return Err(IoUtilsError::MultipleStdInRefs);

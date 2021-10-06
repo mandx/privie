@@ -10,7 +10,12 @@ use json::{object::Object as JsonObject, JsonValue};
 use thiserror::Error as BaseError;
 
 use crate::sealed_box;
-use crate::{path_assign::PathAssign, sealed_box::SealedBoxError};
+use crate::{path_assign::PathAssign, sealed_box::Error as SealedBoxError};
+
+mod keypair;
+use keypair::KeyPair;
+mod secret_value;
+use secret_value::{Error as SecretValueError, SecretValue};
 
 pub trait HandleError {
     // TODO: Add/Pass here some sort of "context", that most importantly
@@ -44,7 +49,7 @@ pub struct DefaultErrorHandler;
 impl HandleError for DefaultErrorHandler {}
 
 #[derive(Debug, BaseError)]
-pub enum SecretsError {
+pub enum Error {
     #[error("This keyring has no keys")]
     EmptyKeyring,
 
@@ -78,17 +83,23 @@ pub enum SecretsError {
         secret: String,
     },
 
-    #[error("Encrypted secret `{secret}` does not have a key section")]
-    MissingSecretKeyId { secret: String },
-    #[error("Encrypted secret `{secret}` does not have a data section")]
-    MissingSecretData { secret: String },
+    // #[error("Encrypted secret `{secret}` does not have a key section")]
+    // MissingSecretKeyId { secret: String },
+    // #[error("Encrypted secret `{secret}` does not have a data section")]
+    // MissingSecretData { secret: String },
 
-    #[error("Decoding `{secret}` as Base64")]
-    Base64Decoding {
-        secret: String,
+    // #[error("Decoding `{secret}` as Base64")]
+    // Base64Decoding {
+    //     secret: String,
+    //     #[source]
+    //     source: base64::DecodeError,
+    // },
+    #[error("{0}")]
+    SecretValue(
         #[source]
-        source: base64::DecodeError,
-    },
+        #[from]
+        SecretValueError,
+    ),
 
     #[error("Could not decrypt `{secret}`")]
     Decrypt {
@@ -120,7 +131,7 @@ impl<'a, H: HandleError + Debug> EncryptedSecrets<'a, H> {
         }
     }
 
-    pub fn decrypt(self) -> Result<PlainSecrets, SecretsError> {
+    pub fn decrypt(self) -> Result<PlainSecrets, Error> {
         self.keyring.decrypt(self)
     }
 
@@ -151,7 +162,7 @@ impl PlainSecrets {
         self,
         keyring: &Keyring<H>,
         public_key: Option<S>,
-    ) -> Result<EncryptedSecrets<H>, SecretsError>
+    ) -> Result<EncryptedSecrets<H>, Error>
     where
         S: AsRef<str>,
         H: HandleError + Debug,
@@ -162,7 +173,7 @@ impl PlainSecrets {
     pub fn encrypt<H: HandleError + Debug>(
         self,
         keyring: &Keyring<H>,
-    ) -> Result<EncryptedSecrets<H>, SecretsError> {
+    ) -> Result<EncryptedSecrets<H>, Error> {
         self.encrypt_with(keyring, None::<&str>)
     }
 
@@ -170,9 +181,6 @@ impl PlainSecrets {
         self.data.clone()
     }
 }
-
-mod keypair;
-use keypair::KeyPair;
 
 use self::keypair::KeyPairError;
 
@@ -224,9 +232,8 @@ impl<H: HandleError + Debug + Default> FromIterator<Keyring<H>> for Keyring<H> {
     where
         I: IntoIterator<Item = Self>,
     {
-        let mut iterator = iterable.into_iter();
         let mut result = Keyring::new(H::default());
-        while let Some(keyring) = iterator.next() {
+        for keyring in iterable {
             result += keyring;
         }
         result
@@ -269,7 +276,7 @@ impl<H: HandleError + Debug> Keyring<H> {
     }
 
     #[allow(clippy::needless_pass_by_value)]
-    pub fn from_json_obj(json_obj: JsonObject, error_handler: H) -> Result<Self, SecretsError> {
+    pub fn from_json_obj(json_obj: JsonObject, error_handler: H) -> Result<Self, Error> {
         let mut this = Self::new(error_handler);
         for (key_id, value) in json_obj.iter() {
             if let json_string @ (JsonValue::String(_) | JsonValue::Short(_)) = value {
@@ -279,7 +286,7 @@ impl<H: HandleError + Debug> Keyring<H> {
                         key_id.to_string(),
                         json_string.as_str().unwrap().to_string(),
                     ))
-                    .map_err(|error| SecretsError::KeyRead {
+                    .map_err(|error| Error::KeyRead {
                         source: error,
                         key_id: key_id.into(),
                     })?,
@@ -289,11 +296,9 @@ impl<H: HandleError + Debug> Keyring<H> {
             } else {
                 this.keys.insert(
                     key_id.into(),
-                    KeyPair::try_from(key_id.to_string()).map_err(|error| {
-                        SecretsError::KeyRead {
-                            source: error,
-                            key_id: key_id.into(),
-                        }
+                    KeyPair::try_from(key_id.to_string()).map_err(|error| Error::KeyRead {
+                        source: error,
+                        key_id: key_id.into(),
                     })?,
                 );
             }
@@ -309,10 +314,10 @@ impl<H: HandleError + Debug> Keyring<H> {
         Ok(this)
     }
 
-    pub fn from_json(json_data: JsonValue, error_handler: H) -> Result<Self, SecretsError> {
+    pub fn from_json(json_data: JsonValue, error_handler: H) -> Result<Self, Error> {
         match json_data {
             JsonValue::Object(obj) => Self::from_json_obj(obj, error_handler),
-            _ => Err(SecretsError::JsonNotAnObject),
+            _ => Err(Error::JsonNotAnObject),
         }
     }
 
@@ -320,27 +325,25 @@ impl<H: HandleError + Debug> Keyring<H> {
         &self,
         key_id: K,
         data: S,
-    ) -> Result<String, SecretsError> {
+    ) -> Result<String, Error> {
         let key_id = key_id.as_ref();
         let key_pair = self
             .keys
             .get(key_id)
             .cloned()
-            .ok_or_else(|| SecretsError::MissingKeyId {
+            .ok_or_else(|| Error::MissingKeyId {
                 key_id: key_id.into(),
             })
             .or_else(|_key_not_found_error| {
-                KeyPair::try_from(key_id.to_string()).map_err(|error| {
-                    SecretsError::DetachedKeyRead {
-                        source: error,
-                        key_id: key_id.into(),
-                    }
+                KeyPair::try_from(key_id.to_string()).map_err(|error| Error::DetachedKeyRead {
+                    source: error,
+                    key_id: key_id.into(),
                 })
             })?;
 
         sealed_box::seal(data.as_ref().as_bytes(), key_pair.public_key())
             .map(|encrypted| format!("{}{}{}", key_id, Self::SEP, base64::encode(encrypted)))
-            .map_err(|error| SecretsError::Encrypt {
+            .map_err(|error| Error::Encrypt {
                 source: error,
                 secret: data.as_ref().into(),
             })
@@ -350,7 +353,7 @@ impl<H: HandleError + Debug> Keyring<H> {
         &self,
         key_id: &S,
         data: &mut JsonValue,
-    ) -> Result<(), SecretsError> {
+    ) -> Result<(), Error> {
         match data {
             JsonValue::Object(obj) => {
                 for v in obj
@@ -378,53 +381,54 @@ impl<H: HandleError + Debug> Keyring<H> {
         Ok(())
     }
 
-    pub fn decrypt_str<S: AsRef<str>>(&self, data: S) -> Result<String, SecretsError> {
-        let mut splitter = data.as_ref().splitn(2, Self::SEP);
+    pub fn decrypt_str<S: AsRef<str>>(&self, data: S) -> Result<String, Error> {
+        // let mut splitter = data.as_ref().splitn(2, Self::SEP);
 
-        let key_id = splitter
-            .next()
-            .ok_or_else(|| SecretsError::MissingSecretKeyId {
-                secret: data.as_ref().into(),
-            })?;
+        // let key_id = splitter
+        //     .next()
+        //     .ok_or_else(|| SecretsError::MissingSecretKeyId {
+        //         secret: data.as_ref().into(),
+        //     })?;
 
-        let encrypted =
-            base64::decode(
-                splitter
-                    .next()
-                    .ok_or_else(|| SecretsError::MissingSecretData {
-                        secret: data.as_ref().into(),
-                    })?,
-            )
-            .map_err(|error| SecretsError::Base64Decoding {
-                secret: data.as_ref().into(),
-                source: error,
-            })?;
+        // let encrypted =
+        //     base64::decode(
+        //         splitter
+        //             .next()
+        //             .ok_or_else(|| SecretsError::MissingSecretData {
+        //                 secret: data.as_ref().into(),
+        //             })?,
+        //     )
+        //     .map_err(|error| SecretsError::Base64Decoding {
+        //         secret: data.as_ref().into(),
+        //         source: error,
+        //     })?;
+        let secret_value = data.as_ref().parse::<SecretValue>()?;
+        let key_id = secret_value.get_key_id();
 
-        let key_pair = self
-            .keys
-            .get(key_id)
-            .ok_or_else(|| SecretsError::MissingKeyId {
-                key_id: key_id.into(),
-            })?;
+        let key_pair = self.keys.get(key_id).ok_or_else(|| Error::MissingKeyId {
+            key_id: key_id.into(),
+        })?;
 
         let secret_key = key_pair
             .private_key()
-            .ok_or_else(|| SecretsError::MissingPrivateKey {
+            .ok_or_else(|| Error::MissingPrivateKey {
                 key_id: key_id.into(),
             })?;
 
         let decrypted =
-            sealed_box::open(&encrypted, secret_key).map_err(|error| SecretsError::Decrypt {
-                secret: data.as_ref().into(),
-                source: error,
+            sealed_box::open(secret_value.get_encrypted(), secret_key).map_err(|error| {
+                Error::Decrypt {
+                    secret: data.as_ref().into(),
+                    source: error,
+                }
             })?;
-        String::from_utf8(decrypted).map_err(|error| SecretsError::InvalidUtf8Data {
+        String::from_utf8(decrypted).map_err(|error| Error::InvalidUtf8Data {
             source: error,
             secret: data.as_ref().into(),
         })
     }
 
-    pub fn decrypt_in_place(&self, data: &mut JsonValue) -> Result<(), SecretsError> {
+    pub fn decrypt_in_place(&self, data: &mut JsonValue) -> Result<(), Error> {
         match data {
             JsonValue::Object(obj) => {
                 for (_k, v) in obj.iter_mut().filter(|(k, _)| !k.starts_with('_')) {
@@ -452,19 +456,19 @@ impl<H: HandleError + Debug> Keyring<H> {
         Ok(())
     }
 
-    pub fn default_public_key(&self) -> Result<&str, SecretsError> {
+    pub fn default_public_key(&self) -> Result<&str, Error> {
         self.default_public_key
             .as_deref()
-            .ok_or(SecretsError::EmptyKeyring)
+            .ok_or(Error::EmptyKeyring)
     }
 
-    pub fn set_default_public_key<S: AsRef<str>>(&mut self, key_id: S) -> Result<(), SecretsError> {
+    pub fn set_default_public_key<S: AsRef<str>>(&mut self, key_id: S) -> Result<(), Error> {
         let key_id = key_id.as_ref();
         if self.keys.contains_key(key_id) {
             self.default_public_key = Some(key_id.into());
         } else {
             let key_pair =
-                KeyPair::try_from(key_id.to_string()).map_err(|error| SecretsError::KeyRead {
+                KeyPair::try_from(key_id.to_string()).map_err(|error| Error::KeyRead {
                     source: error,
                     key_id: key_id.into(),
                 })?;
@@ -478,7 +482,7 @@ impl<H: HandleError + Debug> Keyring<H> {
         &self,
         secrets: PlainSecrets,
         key_id: Option<S>,
-    ) -> Result<EncryptedSecrets<H>, SecretsError>
+    ) -> Result<EncryptedSecrets<H>, Error>
     where
         S: AsRef<str>,
     {
@@ -497,7 +501,7 @@ impl<H: HandleError + Debug> Keyring<H> {
         })
     }
 
-    pub fn decrypt(&self, secrets: EncryptedSecrets<H>) -> Result<PlainSecrets, SecretsError> {
+    pub fn decrypt(&self, secrets: EncryptedSecrets<H>) -> Result<PlainSecrets, Error> {
         let EncryptedSecrets {
             mut data,
             keyring: _,
@@ -508,16 +512,12 @@ impl<H: HandleError + Debug> Keyring<H> {
     }
 }
 
-impl<'k, H: HandleError + Debug> PathAssign<SecretsError> for EncryptedSecrets<'k, H> {
+impl<'k, H: HandleError + Debug> PathAssign<Error> for EncryptedSecrets<'k, H> {
     fn get_assign_target(&mut self) -> &mut JsonValue {
         &mut self.data
     }
 
-    fn preprocess_value<K, J>(
-        &self,
-        path: K,
-        value: Option<J>,
-    ) -> Result<Option<JsonValue>, SecretsError>
+    fn preprocess_value<K, J>(&self, path: K, value: Option<J>) -> Result<Option<JsonValue>, Error>
     where
         K: AsRef<str>,
         J: Into<JsonValue>,
@@ -543,7 +543,7 @@ impl<'k, H: HandleError + Debug> PathAssign<SecretsError> for EncryptedSecrets<'
     }
 }
 
-impl PathAssign<SecretsError> for PlainSecrets {
+impl PathAssign<Error> for PlainSecrets {
     fn get_assign_target(&mut self) -> &mut JsonValue {
         &mut self.data
     }
@@ -975,7 +975,7 @@ mod tests {
         assert_eq!(data["d"]["_dc"], encrypted_data["d"]["_dc"]);
 
         match keyring.decrypt_str(&encrypted_data["b"].to_string()) {
-            Err(SecretsError::MissingPrivateKey { key_id }) => {
+            Err(Error::MissingPrivateKey { key_id }) => {
                 assert_eq!(key_id, keyring.default_public_key().unwrap());
             }
             _ => {
@@ -983,7 +983,7 @@ mod tests {
             }
         }
         match keyring.decrypt_str(&encrypted_data["d"]["db"].to_string()) {
-            Err(SecretsError::MissingPrivateKey { key_id }) => {
+            Err(Error::MissingPrivateKey { key_id }) => {
                 assert_eq!(key_id, keyring.default_public_key().unwrap());
             }
             _ => {
