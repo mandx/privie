@@ -1,6 +1,6 @@
 use blake2::{
     digest::{Update, VariableOutput},
-    VarBlake2b,
+    Blake2bVar,
 };
 use thiserror::Error as BaseError;
 
@@ -37,13 +37,13 @@ fn get_nonce(
     ephemeral_public_key: &PublicKey,
     target_public_key: &PublicKey,
 ) -> [u8; BOX_NONCELENGTH] {
-    let mut hasher = VarBlake2b::new(BOX_NONCELENGTH).unwrap();
+    let mut hasher = Blake2bVar::new(BOX_NONCELENGTH).unwrap();
 
     hasher.update(ephemeral_public_key.as_bytes());
     hasher.update(target_public_key.as_bytes());
 
     let mut nonce = [0_u8; BOX_NONCELENGTH];
-    hasher.finalize_variable(|data| nonce.copy_from_slice(data));
+    hasher.finalize_variable(&mut nonce).unwrap();
     nonce
 }
 
@@ -148,7 +148,7 @@ mod tests {
 
         // Encrypt message with sodiumoxide::box_
         let sbob_pkey = SodiumPKey::from_slice(bob.0.as_bytes()).unwrap();
-        let salice_skey = SodiumSKey::from_slice(&alice.1.to_bytes()).unwrap();
+        let salice_skey = SodiumSKey::from_slice(alice.1.as_bytes()).unwrap();
         let sencrypted = bs_seal(&TEST_PAYLOAD[..], &sodium_nonce, &sbob_pkey, &salice_skey);
 
         assert_eq!(sencrypted, encrypted);
@@ -166,7 +166,7 @@ mod tests {
 
         let sbob = (
             SodiumPKey::from_slice(bob.0.as_bytes()).unwrap(),
-            SodiumSKey::from_slice(&bob.1.to_bytes()).unwrap(),
+            SodiumSKey::from_slice(bob.1.as_bytes()).unwrap(),
         );
 
         // Seal and open local

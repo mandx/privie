@@ -9,13 +9,13 @@ license = "MIT"
 
 [dependencies]
 rand = "^0.8"
-crypto_box = { version = "^0.6", features = ["std"] }
+crypto_box = { version = "^0.7", features = ["std"] }
 structopt = { version = "^0.3", features = ["color", "suggestions"]}
 thiserror = "^1"
 anyhow = "^1"
 base64 = "^0.13"
 json = "^0.12"
-blake2 = "^0.9"
+blake2 = "^0.10"
 
 [dev-dependencies]
 sodiumoxide = "0.2"
