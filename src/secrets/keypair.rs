@@ -115,7 +115,7 @@ impl KeyPair {
             self.key_id(),
             self.private
                 .as_ref()
-                .map(|key| base64::encode(key.to_bytes())),
+                .map(|key| base64::encode(key.as_bytes())),
         )
     }
 

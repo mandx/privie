@@ -898,8 +898,8 @@ mod tests {
             assert_eq!(p1.as_bytes(), s1.as_ref().unwrap().public_key().as_bytes());
             assert_eq!(p2.as_bytes(), s2.as_ref().unwrap().public_key().as_bytes());
             assert_eq!(
-                s1.as_ref().unwrap().to_bytes(),
-                s2.as_ref().unwrap().to_bytes()
+                s1.as_ref().unwrap().as_bytes(),
+                s2.as_ref().unwrap().as_bytes()
             );
         }
     }

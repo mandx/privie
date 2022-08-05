@@ -92,11 +92,12 @@ mod tests {
 
     #[test]
     fn parse_failed_no_colon() {
-        if let Err(Error::MissingSecretData { .. }) = "some-key-id-here".parse::<SecretValue>() {
-        } else {
-            panic!("meh")
+        match "some-key-id-here".parse::<SecretValue>() {
+            Err(Error::MissingSecretData { .. }) => {}
+            _ => {
+                panic!("parse_failed_no_colon didn't fail as expected");
+            }
         }
-        // assert!(result.is_err());
     }
 
     #[test]
