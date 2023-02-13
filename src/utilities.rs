@@ -7,6 +7,16 @@ use std::{
 
 use thiserror::Error as ThisError;
 
+pub fn base64_decode<T: AsRef<[u8]>>(input: T) -> Result<Vec<u8>, base64::DecodeError> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    STANDARD.decode(input)
+}
+
+pub fn base64_encode<T: AsRef<[u8]>>(input: T) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    STANDARD.encode(input)
+}
+
 #[derive(Debug, ThisError)]
 pub enum IoUtilsError<P: std::fmt::Debug + Display> {
     #[error("Could not open `{path}`")]

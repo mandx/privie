@@ -9,8 +9,11 @@ use std::{
 use json::{object::Object as JsonObject, JsonValue};
 use thiserror::Error as BaseError;
 
-use crate::sealed_box;
-use crate::{path_assign::PathAssign, sealed_box::Error as SealedBoxError};
+use crate::{
+    path_assign::PathAssign,
+    sealed_box::{self, Error as SealedBoxError},
+    utilities::base64_encode,
+};
 
 mod keypair;
 use keypair::KeyPair;
@@ -83,17 +86,6 @@ pub enum Error {
         secret: String,
     },
 
-    // #[error("Encrypted secret `{secret}` does not have a key section")]
-    // MissingSecretKeyId { secret: String },
-    // #[error("Encrypted secret `{secret}` does not have a data section")]
-    // MissingSecretData { secret: String },
-
-    // #[error("Decoding `{secret}` as Base64")]
-    // Base64Decoding {
-    //     secret: String,
-    //     #[source]
-    //     source: base64::DecodeError,
-    // },
     #[error("{0}")]
     SecretValue(
         #[source]
@@ -342,7 +334,7 @@ impl<H: HandleError + Debug> Keyring<H> {
             })?;
 
         sealed_box::seal(data.as_ref().as_bytes(), key_pair.public_key())
-            .map(|encrypted| format!("{}{}{}", key_id, Self::SEP, base64::encode(encrypted)))
+            .map(|encrypted| format!("{}{}{}", key_id, Self::SEP, base64_encode(encrypted)))
             .map_err(|error| Error::Encrypt {
                 source: error,
                 secret: data.as_ref().into(),
@@ -382,26 +374,6 @@ impl<H: HandleError + Debug> Keyring<H> {
     }
 
     pub fn decrypt_str<S: AsRef<str>>(&self, data: S) -> Result<String, Error> {
-        // let mut splitter = data.as_ref().splitn(2, Self::SEP);
-
-        // let key_id = splitter
-        //     .next()
-        //     .ok_or_else(|| SecretsError::MissingSecretKeyId {
-        //         secret: data.as_ref().into(),
-        //     })?;
-
-        // let encrypted =
-        //     base64::decode(
-        //         splitter
-        //             .next()
-        //             .ok_or_else(|| SecretsError::MissingSecretData {
-        //                 secret: data.as_ref().into(),
-        //             })?,
-        //     )
-        //     .map_err(|error| SecretsError::Base64Decoding {
-        //         secret: data.as_ref().into(),
-        //         source: error,
-        //     })?;
         let secret_value = data.as_ref().parse::<SecretValue>()?;
         let key_id = secret_value.get_key_id();
 
@@ -577,6 +549,7 @@ mod assign_tests {
 
 #[cfg(test)]
 mod tests {
+    use crate::utilities::base64_decode;
     use json::object;
 
     use super::*;
@@ -681,7 +654,7 @@ mod tests {
         assert_eq!(
             encrypted_msg
                 .split(Keyring::<DefaultErrorHandler>::SEP)
-                .map(base64::decode)
+                .map(base64_decode)
                 .filter(Result::is_ok)
                 .collect::<Vec<_>>()
                 .len(),
@@ -893,8 +866,8 @@ mod tests {
 
         for ((k1, (p1, s1)), (k2, (p2, s2))) in keyring_pairs.iter().zip(restored_pairs.iter()) {
             assert_eq!(k1, k2);
-            assert_eq!(base64::decode(k1).unwrap(), p1.as_bytes());
-            assert_eq!(base64::decode(k2).unwrap(), p2.as_bytes());
+            assert_eq!(base64_decode(k1).unwrap(), p1.as_bytes());
+            assert_eq!(base64_decode(k2).unwrap(), p2.as_bytes());
             assert_eq!(p1.as_bytes(), s1.as_ref().unwrap().public_key().as_bytes());
             assert_eq!(p2.as_bytes(), s2.as_ref().unwrap().public_key().as_bytes());
             assert_eq!(

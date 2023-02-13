@@ -6,7 +6,7 @@ use thiserror::Error as BaseError;
 
 use crypto_box::{
     aead::{generic_array::GenericArray, Aead, Error as AeadError},
-    Box as CryptoBox,
+    SalsaBox,
 };
 
 // Re-export the main structs & constants
@@ -60,7 +60,7 @@ pub fn seal(data: &[u8], public_key: &PublicKey) -> Result<Vec<u8>, Error> {
     let nonce_bytes = get_nonce(&ephemeral_public_key, public_key);
     let nonce = GenericArray::from_slice(&nonce_bytes);
 
-    let crypto_box = CryptoBox::new(public_key, &ephemeral_secret_key);
+    let crypto_box = SalsaBox::new(public_key, &ephemeral_secret_key);
 
     result.extend_from_slice(&crypto_box.encrypt(nonce, data).map_err(Error::from)?);
     Ok(result)
@@ -85,14 +85,14 @@ pub fn open(ciphertext: &[u8], secret_key: &SecretKey) -> Result<Vec<u8>, Error>
     let nonce = GenericArray::from_slice(&nonce);
 
     let encrypted = &ciphertext[KEY_SIZE..];
-    let crypto_box = CryptoBox::new(&ephemeral_pk, secret_key);
+    let crypto_box = SalsaBox::new(&ephemeral_pk, secret_key);
     crypto_box.decrypt(nonce, encrypted).map_err(Error::from)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crypto_box::{Box as CryptoBox, SecretKey};
+    use crypto_box::{SalsaBox, SecretKey};
 
     const TEST_PAYLOAD: &[u8; 15] = b"sealed_box test";
 
@@ -141,7 +141,7 @@ mod tests {
         let sodium_nonce = Nonce::from_slice(&nonce).unwrap();
 
         // Encrypt message with crypto_box
-        let crypto_box = CryptoBox::new(&bob.0, &alice.1);
+        let crypto_box = SalsaBox::new(&bob.0, &alice.1);
         let encrypted = crypto_box
             .encrypt(&GenericArray::from_slice(&nonce), &TEST_PAYLOAD[..])
             .unwrap();

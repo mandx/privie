@@ -2,7 +2,10 @@ use std::convert::{TryFrom, TryInto};
 
 use thiserror::Error as BaseError;
 
-use crate::sealed_box::{PublicKey, SecretKey, KEY_SIZE};
+use crate::{
+    sealed_box::{PublicKey, SecretKey, KEY_SIZE},
+    utilities::{base64_decode, base64_encode},
+};
 
 #[derive(Debug, BaseError)]
 pub enum KeyPairError {
@@ -44,7 +47,7 @@ impl TryFrom<(String, String)> for KeyPair {
 
         if secret_key.public_key() != public_key {
             return Err(Self::Error::KeyPairMismatch {
-                key: base64::encode(public_key),
+                key: base64_encode(public_key),
             });
         }
 
@@ -83,7 +86,7 @@ impl KeyPair {
     fn decode_key<S: AsRef<str>>(key: S) -> Result<[u8; KEY_SIZE], KeyPairError> {
         let key = key.as_ref();
         let decoded =
-            base64::decode(key.as_bytes()).map_err(|error| KeyPairError::Base64Decoding {
+            base64_decode(key.as_bytes()).map_err(|error| KeyPairError::Base64Decoding {
                 source: error,
                 data: key.to_string(),
             })?;
@@ -115,12 +118,12 @@ impl KeyPair {
             self.key_id(),
             self.private
                 .as_ref()
-                .map(|key| base64::encode(key.as_bytes())),
+                .map(|key| base64_encode(key.as_bytes())),
         )
     }
 
     pub fn key_id(&self) -> String {
-        base64::encode(&self.public)
+        base64_encode(&self.public)
     }
 
     pub fn public_key(&self) -> &PublicKey {
@@ -178,12 +181,5 @@ mod tests {
             k2_secret.clone().unwrap(),
         ))
         .is_err());
-
-        // let mut rng = rand::rngs::OsRng;
-        // let mut buf = Vec::with_capacity(KEY_SIZE * 3);
-        // rng.fill_bytes(&mut buf);
-        // assert!(
-        //     Keyring::<ErrorHandlerStub>::check_key_pair(k1_public, &base64::encode(buf)).is_err()
-        // );
     }
 }

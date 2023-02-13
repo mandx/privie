@@ -2,6 +2,8 @@ use std::str::FromStr;
 
 use thiserror::Error as BaseError;
 
+use crate::utilities::base64_decode;
+
 #[derive(Debug, BaseError)]
 pub enum Error {
     #[error("Encrypted secret `{secret}` does not have a key section")]
@@ -43,14 +45,13 @@ impl FromStr for SecretValue {
             secret: data.into(),
         })?;
 
-        let encrypted =
-            base64::decode(splitter.next().ok_or_else(|| Error::MissingSecretData {
-                secret: data.into(),
-            })?)
-            .map_err(|error| Error::Base64Decoding {
-                secret: data.into(),
-                source: error,
-            })?;
+        let encrypted = base64_decode(splitter.next().ok_or_else(|| Error::MissingSecretData {
+            secret: data.into(),
+        })?)
+        .map_err(|error| Error::Base64Decoding {
+            secret: data.into(),
+            source: error,
+        })?;
 
         Ok(Self {
             key_id: key_id.to_string(),
@@ -62,6 +63,7 @@ impl FromStr for SecretValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utilities::base64_encode;
     use rand::RngCore;
 
     #[test]
@@ -73,7 +75,7 @@ mod tests {
         };
 
         let original_key_id = "some-key-id-here";
-        let secret_value = format!("{}:{}", original_key_id, base64::encode(encrypted))
+        let secret_value = format!("{}:{}", original_key_id, base64_encode(encrypted))
             .parse::<SecretValue>()
             .unwrap();
         assert_eq!(secret_value.get_key_id(), original_key_id);
