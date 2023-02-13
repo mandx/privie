@@ -8,15 +8,19 @@ on:
 jobs:
 
   test:
+    strategy:
+      matrix:
+        toolchain: ['stable', 'nightly', '1.56']
     name: Test Suite
+    continue-on-error: ${{ matrix.experimental == 'nightly' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: ${{ matrix.toolchain }}
           profile: minimal
           override: true
       - uses: actions-rs/cargo@v1
@@ -29,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -45,14 +49,18 @@ jobs:
 
   clippy:
     name: Clippy
+    continue-on-error: ${{ matrix.experimental == 'nightly' }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain: ['stable', 'nightly', '1.56']
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: ${{ matrix.toolchain }}
           profile: minimal
           override: true
           components: clippy
@@ -67,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -87,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -99,12 +107,48 @@ jobs:
           command: publish
           args: --dry-run
 
-  coverage:
-    name: Code coverage
+  coverage-grcov:
+    name: Code coverage (with grcov)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+          components: llvm-tools-preview
+      - name: Download grcov
+        run: |
+          mkdir -p "${HOME}/.local/bin"
+          curl -sL https://github.com/mozilla/grcov/releases/download/v0.8.10/grcov-x86_64-unknown-linux-gnu.tar.bz2 | tar jxf - -C "${HOME}/.local/bin"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Run `cargo test` with instrumentation
+        env:
+          CARGO_INCREMENTAL: 0
+          RUSTFLAGS: '-Cinstrument-coverage'
+          LLVM_PROFILE_FILE: 'cargo-test-%p-%m.profraw'
+        run: |
+          mkdir -p target/coverage/
+          cargo test
+          grcov . --binary-path ./target/debug/deps/ -s . -t lcov --branch --ignore-not-existing --ignore '../*' --ignore "/*" -o target/coverage/tests.lcov
+      - name: Upload to Coveralls
+        # upload only if push
+        if: ${{ github.event_name == 'push' }}
+        uses: coverallsapp/github-action@master
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: 'target/coverage/tests.lcov'
+
+  coverage-tarpaulin:
+    name: Code coverage (with cargo-tarpaulin)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -114,7 +158,9 @@ jobs:
       - name: Run cargo-tarpaulin
         uses: actions-rs/tarpaulin@v0.1
         with:
-          args: '--all-features --workspace --ignore-tests --out Lcov'
+          version: '0.25.0'
+          args: '--all-features --workspace --ignore-tests'
+          out-type: 'Lcov'
       - name: Upload to Coveralls
         # upload only if push
         if: ${{ github.event_name == 'push' }}
@@ -122,4 +168,3 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path-to-lcov: './lcov.info'
-
